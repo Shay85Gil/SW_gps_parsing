@@ -20,6 +20,13 @@
 #include <string>
 #include <vector>
 
+// ─── Display formatting constants ──────────────────────────────────────────
+
+static constexpr int kDisplayPrecision = 6;
+static constexpr int kColIndex         = 6;
+static constexpr int kColCoord         = 14;
+static constexpr int kSeparatorWidth   = 44;
+
 int main(int argc, char* argv[])
 {
     if (argc < 2) {
@@ -100,21 +107,21 @@ int main(int argc, char* argv[])
         return 0;
     }
 
-    std::cout << std::fixed << std::setprecision(6);
+    std::cout << std::fixed << std::setprecision(kDisplayPrecision);
     std::cout << "=== Route Points ===\n";
     std::cout << std::left
-              << std::setw(6)  << "#"
-              << std::setw(14) << "Latitude"
-              << std::setw(14) << "Longitude"
+              << std::setw(kColIndex) << "#"
+              << std::setw(kColCoord) << "Latitude"
+              << std::setw(kColCoord) << "Longitude"
               << "Speed (m/s)\n";
-    std::cout << std::string(44, '-') << '\n';
+    std::cout << std::string(kSeparatorWidth, '-') << '\n';
 
     for (std::size_t i = 0; i < route.size(); ++i) {
         gps_data_t gd = to_gps_data(route[i]);
 
-        std::cout << std::setw(6)  << (i + 1)
-                  << std::setw(14) << gd.fix.latitude
-                  << std::setw(14) << gd.fix.longitude
+        std::cout << std::setw(kColIndex) << (i + 1)
+                  << std::setw(kColCoord) << gd.fix.latitude
+                  << std::setw(kColCoord) << gd.fix.longitude
                   << gd.fix.speed << '\n';
     }
 

@@ -10,9 +10,46 @@
 #include <string>
 #include <vector>
 
-// ─── Internal constants ─────────────────────────────────────────────────────
+// ─── NMEA protocol constants ────────────────────────────────────────────────
 
-static constexpr double      kKnotsToMps = 0.514444;
+static constexpr char        kNmeaStart       = '$';
+static constexpr char        kNmeaChecksumSep = '*';
+static constexpr char        kNmeaFieldDelim  = ',';
+static constexpr std::size_t kChecksumHexLen  = 2;  // two hex digits after '*'
+
+// ─── GPRMC field indices (0-based, after splitting on ',') ──────────────────
+
+static constexpr std::size_t kFieldSentenceId = 0;
+static constexpr std::size_t kFieldTime       = 1;
+static constexpr std::size_t kFieldStatus     = 2;
+static constexpr std::size_t kFieldLat        = 3;
+static constexpr std::size_t kFieldNS         = 4;
+static constexpr std::size_t kFieldLon        = 5;
+static constexpr std::size_t kFieldEW         = 6;
+static constexpr std::size_t kFieldSpeed      = 7;
+static constexpr std::size_t kGprmcMinFields  = kFieldSpeed + 1;  // need at least 8
+
+// ─── Sentence identifiers ──────────────────────────────────────────────────
+
+static constexpr const char* kIdGPRMC = "$GPRMC";
+static constexpr const char* kIdGNRMC = "$GNRMC";
+static constexpr const char* kIdGPGSA = "$GPGSA";
+static constexpr const char* kIdGPGGA = "$GPGGA";
+static constexpr const char* kIdGNGSA = "$GNGSA";
+static constexpr const char* kIdGNGGA = "$GNGGA";
+
+// ─── Parsing constants ─────────────────────────────────────────────────────
+
+static constexpr char   kStatusActive     = 'A';   // RMC status: Active (valid fix)
+static constexpr char   kHemSouth         = 'S';
+static constexpr char   kHemWest          = 'W';
+static constexpr double kKnotsToMps       = 0.514444;
+static constexpr double kMinutesPerDegree = 60.0;
+static constexpr std::size_t kMinuteDigitWidth = 2;  // "MM" portion before decimal
+static constexpr std::size_t kHemFieldLen = 1;        // single-char hemisphere field
+
+// ─── Internal limits ────────────────────────────────────────────────────────
+
 static constexpr std::size_t kMaxFields  = 20;
 
 // ─── Internal helpers ───────────────────────────────────────────────────────
@@ -38,20 +75,20 @@ static double nmea_to_decimal(const std::string& raw, char hem)
     if (raw.empty()) return std::nan("");
 
     auto dot = raw.find('.');
-    if (dot == std::string::npos || dot < 2)
+    if (dot == std::string::npos || dot < kMinuteDigitWidth)
         return std::nan("");
 
     double degrees = 0.0;
     double minutes = 0.0;
     try {
-        degrees = std::stod(raw.substr(0, dot - 2));
-        minutes = std::stod(raw.substr(dot - 2));
+        degrees = std::stod(raw.substr(0, dot - kMinuteDigitWidth));
+        minutes = std::stod(raw.substr(dot - kMinuteDigitWidth));
     } catch (...) {
         return std::nan("");
     }
 
-    double dd = degrees + minutes / 60.0;
-    if (hem == 'S' || hem == 'W')
+    double dd = degrees + minutes / kMinutesPerDegree;
+    if (hem == kHemSouth || hem == kHemWest)
         dd = -dd;
     return dd;
 }
@@ -60,11 +97,12 @@ static double nmea_to_decimal(const std::string& raw, char hem)
 
 ChecksumResult verify_checksum(const std::string& sentence)
 {
-    if (sentence.empty() || sentence[0] != '$')
+    if (sentence.empty() || sentence[0] != kNmeaStart)
         return ChecksumResult::kIncomplete;
 
-    auto star = sentence.rfind('*');
-    if (star == std::string::npos || star + 3 > sentence.size())
+    auto star = sentence.rfind(kNmeaChecksumSep);
+    if (star == std::string::npos ||
+        star + 1 + kChecksumHexLen > sentence.size())
         return ChecksumResult::kIncomplete;
 
     uint8_t computed = 0;
@@ -82,53 +120,56 @@ ChecksumResult verify_checksum(const std::string& sentence)
 
 bool is_not_relevant(const std::string& sentence)
 {
-    auto comma = sentence.find(',');
+    auto comma = sentence.find(kNmeaFieldDelim);
     if (comma == std::string::npos)
         return false;
 
     auto id = sentence.substr(0, comma);
-    return id == "$GPGSA" || id == "$GPGGA" ||
-           id == "$GNGSA" || id == "$GNGGA";
+    return id == kIdGPGSA || id == kIdGPGGA ||
+           id == kIdGNGSA || id == kIdGNGGA;
 }
 
 bool parse_gprmc(const std::string& sentence, NmeaRecord& out)
 {
-    auto star = sentence.rfind('*');
+    auto star = sentence.rfind(kNmeaChecksumSep);
     std::string body = (star != std::string::npos) ? sentence.substr(0, star)
                                                    : sentence;
 
-    auto fields = split(body, ',');
+    auto fields = split(body, kNmeaFieldDelim);
 
-    if (fields.size() < 8)
+    if (fields.size() < kGprmcMinFields)
         return false;
 
-    if (fields[0] != "$GPRMC" && fields[0] != "$GNRMC")
+    if (fields[kFieldSentenceId] != kIdGPRMC &&
+        fields[kFieldSentenceId] != kIdGNRMC)
         return false;
 
-    if (fields[2].empty() || fields[2][0] != 'A')
+    if (fields[kFieldStatus].empty() ||
+        fields[kFieldStatus][0] != kStatusActive)
         return false;
 
-    if (fields[1].empty())
+    if (fields[kFieldTime].empty())
         return false;
 
-    if (fields[4].size() != 1 || fields[6].size() != 1)
+    if (fields[kFieldNS].size() != kHemFieldLen ||
+        fields[kFieldEW].size() != kHemFieldLen)
         return false;
 
-    double lat = nmea_to_decimal(fields[3], fields[4][0]);
-    double lon = nmea_to_decimal(fields[5], fields[6][0]);
+    double lat = nmea_to_decimal(fields[kFieldLat], fields[kFieldNS][0]);
+    double lon = nmea_to_decimal(fields[kFieldLon], fields[kFieldEW][0]);
     if (std::isnan(lat) || std::isnan(lon))
         return false;
 
     double speed_knots = 0.0;
-    if (!fields[7].empty()) {
+    if (!fields[kFieldSpeed].empty()) {
         try {
-            speed_knots = std::stod(fields[7]);
+            speed_knots = std::stod(fields[kFieldSpeed]);
         } catch (...) {
             speed_knots = 0.0;
         }
     }
 
-    out.timestamp = fields[1];
+    out.timestamp = fields[kFieldTime];
     out.latitude  = lat;
     out.longitude = lon;
     out.speed_mps = speed_knots * kKnotsToMps;

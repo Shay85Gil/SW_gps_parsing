@@ -218,6 +218,80 @@ An external NMEA library (e.g. `libnmea`, `minmea`) would reduce code but add a 
 - **Empty result set** — a message is printed; the tool exits with code 0.
 - **No crashes** — all string-to-number conversions are wrapped in `try/catch`; hemisphere and field-count checks prevent out-of-bounds access.
 
+## Constants
+
+All magic numbers have been replaced with named `static constexpr` constants. Constants are grouped by module; those marked **(public)** are in headers and available to consumers, while **(internal)** constants live in `.cpp` files.
+
+### NMEA Protocol (`nmea_parser.cpp`, internal)
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `kNmeaStart` | `'$'` | NMEA sentence start character. |
+| `kNmeaChecksumSep` | `'*'` | Separator between sentence body and checksum. |
+| `kNmeaFieldDelim` | `','` | NMEA field delimiter. |
+| `kChecksumHexLen` | `2` | Number of hex digits after `*`. |
+
+### GPRMC Field Indices (`nmea_parser.cpp`, internal)
+
+| Constant | Value | GPRMC field |
+|----------|-------|-------------|
+| `kFieldSentenceId` | `0` | Sentence type (`$GPRMC` / `$GNRMC`). |
+| `kFieldTime` | `1` | UTC time (`HHMMSS.sss`). |
+| `kFieldStatus` | `2` | Status (`A` = active, `V` = void). |
+| `kFieldLat` | `3` | Latitude in `DDMM.MMMM` format. |
+| `kFieldNS` | `4` | North/South hemisphere indicator. |
+| `kFieldLon` | `5` | Longitude in `DDDMM.MMMM` format. |
+| `kFieldEW` | `6` | East/West hemisphere indicator. |
+| `kFieldSpeed` | `7` | Speed over ground in knots. |
+| `kGprmcMinFields` | `8` | Minimum fields required (`kFieldSpeed + 1`). |
+
+### Sentence Identifiers (`nmea_parser.cpp`, internal)
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `kIdGPRMC` | `"$GPRMC"` | GPS-only RMC sentence. |
+| `kIdGNRMC` | `"$GNRMC"` | Multi-constellation RMC sentence. |
+| `kIdGPGSA` | `"$GPGSA"` | GPS-only GSA (not relevant). |
+| `kIdGPGGA` | `"$GPGGA"` | GPS-only GGA (not relevant). |
+| `kIdGNGSA` | `"$GNGSA"` | Multi-constellation GSA (not relevant). |
+| `kIdGNGGA` | `"$GNGGA"` | Multi-constellation GGA (not relevant). |
+
+### Parsing Constants (`nmea_parser.cpp`, internal)
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `kStatusActive` | `'A'` | RMC status indicating a valid fix. |
+| `kHemSouth` | `'S'` | Southern hemisphere — negates latitude. |
+| `kHemWest` | `'W'` | Western hemisphere — negates longitude. |
+| `kKnotsToMps` | `0.514444` | Knots → metres/second conversion factor. |
+| `kMinutesPerDegree` | `60.0` | Arc-minutes in one degree. |
+| `kMinuteDigitWidth` | `2` | Width of the `MM` portion before the decimal point. |
+| `kHemFieldLen` | `1` | Expected length of a hemisphere field (`N`/`S`/`E`/`W`). |
+| `kMaxFields` | `20` | Pre-allocation hint for field splitting. |
+
+### Deduplication (`dedup.h`, public)
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `kSpatialEpsilon` | `1e-5` | Spatial dedup threshold in decimal degrees (~1.1 m at equator). |
+
+### Output (`output.cpp`, internal)
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `kCoordPrecision` | `6` | Decimal places for coordinate formatting. |
+| `kGpsStatusValid` | `1` | `gps_data_t.status` value for a valid fix. |
+| `kGoogleMapsBase` | `"https://www.google.com/maps/dir"` | Base URL for Google Maps directions. |
+
+### Display Formatting (`main.cpp`, internal)
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `kDisplayPrecision` | `6` | `std::setprecision` for coordinate output. |
+| `kColIndex` | `6` | Column width for the row-number column. |
+| `kColCoord` | `14` | Column width for latitude/longitude columns. |
+| `kSeparatorWidth` | `44` | Width of the `---…` separator line. |
+
 ## Full API Reference
 
 Complete reference for every public symbol exposed by the project headers. Internal (`static`) helpers in `.cpp` files are implementation details and not documented here.
