@@ -12,8 +12,9 @@ else
     RM     := rm -f
 endif
 
-SRCS := main.cpp
+SRCS := main.cpp nmea_parser.cpp dedup.cpp output.cpp
 OBJS := $(SRCS:.cpp=.o)
+HDRS := gpsd.h nmea_parser.h dedup.h output.h
 
 .PHONY: all clean
 
@@ -22,7 +23,7 @@ all: $(TARGET)
 $(TARGET): $(OBJS)
 	$(CXX) $(CXXFLAGS) -o $@ $^
 
-%.o: %.cpp gpsd.h
+%.o: %.cpp $(HDRS)
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 clean:
