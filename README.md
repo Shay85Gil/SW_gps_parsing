@@ -68,7 +68,9 @@ https://www.google.com/maps/dir/32.073021,34.791264/32.073155,34.791400/...
 │   └── main.cpp                    ─ Application entry point (orchestrator)
 ├── src/
 │   ├── gpsd/
-│   │   └── gpsd.h                  ─ Provided C header (gps_data_t, gps_fix_t, helpers)
+│   │   └── gpsd.h                  ─ Real gpsd daemon header (reference only, not compiled)
+│   ├── gps_compat/
+│   │   └── gps_compat.h            ─ Self-contained subset of gpsd public API types
 │   ├── nmea_parser/
 │   │   ├── nmea_parser.h           ─ Checksum verification, sentence classification, $GPRMC parsing
 │   │   └── nmea_parser.cpp
@@ -196,7 +198,8 @@ An external NMEA library (e.g. `libnmea`, `minmea`) would reduce code but add a 
 
 | File | Role |
 |------|------|
-| `src/gpsd/gpsd.h` | Provided C header — defines `gps_data_t`, `gps_fix_t`, validity masks, and safe getters. |
+| `src/gpsd/gpsd.h` | Real gpsd daemon header — kept for reference; not compiled (requires full gpsd build env). |
+| `src/gps_compat/gps_compat.h` | Self-contained subset of the gpsd public API. Defines `gps_data_t`, `gps_fix_t`, `gps_mask_t`, and `*_SET` / `MODE_*` constants using the same names as the real `gps.h`. |
 | `src/nmea_parser/nmea_parser.h` | Public API for checksum verification, sentence classification, and `$GPRMC` parsing. Defines `NmeaRecord` and `ChecksumResult`. |
 | `src/nmea_parser/nmea_parser.cpp` | Implementation of the above plus internal helpers (`split`, `nmea_to_decimal`). |
 | `src/dedup/dedup.h` | Public API for temporal and spatial deduplication. Defines `kSpatialEpsilon`. |
@@ -221,16 +224,21 @@ Complete reference for every public symbol exposed by the project headers. Inter
 
 ---
 
-### `src/gpsd/gpsd.h` — GPS Data Structures (provided)
+### `src/gpsd/gpsd.h` — Real gpsd Daemon Header (reference)
 
-C-linkage header (`extern "C"`) defining the canonical data container that the rest of the project populates.
+The real gpsd daemon internals header. Kept in the repository for reference but **not compiled** — it requires the full gpsd build environment (`GPSD_CONFIG_H`, `compiler.h`, `gps.h`, `os_compat.h`, etc.). Our code uses `gps_compat.h` instead.
+
+---
+
+### `src/gps_compat/gps_compat.h` — GPS Data Structures
+
+Self-contained C-linkage header (`extern "C"`) providing the subset of the gpsd public API (`gps.h`) that the project needs. Type names, field names, and flag values match the real gpsd library so code is source-compatible if later linked against the full `libgps`.
 
 #### Types
 
 | Type | Definition | Purpose |
 |------|-----------|---------|
 | `gps_mask_t` | `uint64_t` | Bitmask indicating which fields in `gps_data_t` carry valid data. |
-| `fix_mode_t` | `enum { MODE_NO_FIX=1, MODE_2D=2, MODE_3D=3 }` | Receiver fix quality. `MODE_2D` = lat/lon valid, `MODE_3D` = lat/lon/alt valid. |
 | `gps_fix_t` | `struct` | A single navigation fix. |
 | `gps_data_t` | `struct` | Top-level container wrapping a fix, its validity mask, and receiver status. |
 
@@ -239,46 +247,38 @@ C-linkage header (`extern "C"`) defining the canonical data container that the r
 | Field | Type | Unit | Description |
 |-------|------|------|-------------|
 | `time` | `double` | seconds (Unix epoch) | Timestamp of the fix. |
+| `mode` | `int` | — | Fix type (`MODE_NOT_SEEN`, `MODE_NO_FIX`, `MODE_2D`, `MODE_3D`). |
 | `latitude` | `double` | degrees (WGS84) | +N / −S. |
 | `longitude` | `double` | degrees (WGS84) | +E / −W. |
 | `speed` | `double` | m/s | Speed over ground. |
-| `mode` | `fix_mode_t` | — | Fix type (`MODE_NO_FIX`, `MODE_2D`, `MODE_3D`). |
 
 #### `gps_data_t` fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `set` | `gps_mask_t` | Bitwise OR of `GPS_SET_*` flags. |
+| `set` | `gps_mask_t` | Bitwise OR of `*_SET` flags. |
 | `fix` | `gps_fix_t` | Most recent navigation fix. |
 | `status` | `int` | Implementation-defined receiver status. |
 
-#### Validity flag constants
+#### Validity flag constants (match real `gps.h`)
 
 | Constant | Value | Meaning |
 |----------|-------|---------|
-| `GPS_SET_NONE` | `0` | No fields valid. |
-| `GPS_SET_LATLON` | `1 << 0` | `fix.latitude` and `fix.longitude` are valid. |
-| `GPS_SET_SPEED` | `1 << 1` | `fix.speed` is valid. |
-| `GPS_SET_TIME` | `1 << 2` | `fix.time` is valid. |
-| `GPS_SET_MODE` | `1 << 3` | `fix.mode` is valid. |
+| `TIME_SET` | `1llu << 0` | `fix.time` is valid. |
+| `MODE_SET` | `1llu << 1` | `fix.mode` is valid. |
+| `LATLON_SET` | `1llu << 4` | `fix.latitude` and `fix.longitude` are valid. |
+| `SPEED_SET` | `1llu << 8` | `fix.speed` is valid. |
+
+#### Fix mode constants (match real `gps.h`)
+
+| Constant | Value | Meaning |
+|----------|-------|---------|
+| `MODE_NOT_SEEN` | `0` | Mode not yet determined. |
+| `MODE_NO_FIX` | `1` | No valid fix. |
+| `MODE_2D` | `2` | Lat/lon valid. |
+| `MODE_3D` | `3` | Lat/lon/alt valid. |
 
 #### Inline helper functions
-
-**`int gps_has_latlon(const gps_data_t *d)`**
-
-Returns non-zero if `d` is non-null, `GPS_SET_LATLON` is set, and `fix.mode >= MODE_2D`.
-
-**`int gps_has_speed(const gps_data_t *d)`**
-
-Returns non-zero if `d` is non-null, `GPS_SET_SPEED` is set, and `fix.mode >= MODE_2D`.
-
-**`int gps_get_latlon(const gps_data_t *d, double *lat, double *lon)`**
-
-Safe getter. Writes latitude and longitude through the output pointers. Returns `0` on success, `-1` if the position is unavailable or any pointer is null.
-
-**`int gps_get_speed_mps(const gps_data_t *d, double *speed_mps)`**
-
-Safe getter. Writes speed (m/s) through the output pointer. Returns `0` on success, `-1` if speed is unavailable or the pointer is null.
 
 **`double gps_mps_to_kmh(double mps)`**
 
@@ -417,7 +417,7 @@ Declared in `src/output/output.h`, implemented in `src/output/output.cpp`.
 
 #### `gps_data_t to_gps_data(const NmeaRecord& r)`
 
-Converts an `NmeaRecord` into the `gps_data_t` structure from `gpsd.h`.
+Converts an `NmeaRecord` into the `gps_data_t` structure from `gps_compat.h`.
 
 | Parameter | Description |
 |-----------|-------------|
@@ -425,7 +425,7 @@ Converts an `NmeaRecord` into the `gps_data_t` structure from `gpsd.h`.
 
 | Return | Description |
 |--------|-------------|
-| `gps_data_t` | Populated structure with `set = GPS_SET_LATLON \| GPS_SET_SPEED`, `mode = MODE_2D`, `status = 1`. |
+| `gps_data_t` | Populated structure with `set = LATLON_SET \| SPEED_SET`, `mode = MODE_2D`, `status = 1`. |
 
 **Field mapping:**
 
@@ -435,7 +435,7 @@ Converts an `NmeaRecord` into the `gps_data_t` structure from `gpsd.h`.
 | `r.longitude` | `fix.longitude` |
 | `r.speed_mps` | `fix.speed` |
 | — | `fix.mode = MODE_2D` |
-| — | `set = GPS_SET_LATLON \| GPS_SET_SPEED` |
+| — | `set = LATLON_SET \| SPEED_SET` |
 | — | `status = 1` |
 
 #### `std::string build_google_maps_url(const std::vector<NmeaRecord>& route)`

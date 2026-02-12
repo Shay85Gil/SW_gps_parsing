@@ -10,7 +10,7 @@
 gps_data_t to_gps_data(const NmeaRecord& r)
 {
     gps_data_t d{};
-    d.set            = GPS_SET_LATLON | GPS_SET_SPEED;
+    d.set            = LATLON_SET | SPEED_SET;
     d.fix.latitude   = r.latitude;
     d.fix.longitude  = r.longitude;
     d.fix.speed      = r.speed_mps;

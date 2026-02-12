@@ -11,7 +11,7 @@
 #include "nmea_parser.h"
 #include "dedup.h"
 #include "output.h"
-#include "gpsd.h"
+#include "gps_compat.h"
 
 #include <cstddef>
 #include <fstream>
@@ -112,14 +112,10 @@ int main(int argc, char* argv[])
     for (std::size_t i = 0; i < route.size(); ++i) {
         gps_data_t gd = to_gps_data(route[i]);
 
-        double lat = 0.0, lon = 0.0, spd = 0.0;
-        gps_get_latlon(&gd, &lat, &lon);
-        gps_get_speed_mps(&gd, &spd);
-
         std::cout << std::setw(6)  << (i + 1)
-                  << std::setw(14) << lat
-                  << std::setw(14) << lon
-                  << spd << '\n';
+                  << std::setw(14) << gd.fix.latitude
+                  << std::setw(14) << gd.fix.longitude
+                  << gd.fix.speed << '\n';
     }
 
     std::cout << "\n=== Google Maps URL ===\n"
