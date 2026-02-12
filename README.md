@@ -12,11 +12,11 @@ A production-grade C++17 command-line utility that processes GNSS data from NMEA
 ### Compile
 
 ```bash
-make            # produces ./nmea_parser (Linux) or nmea_parser.exe (Windows)
-make clean      # remove build artefacts
+make            # produces build/nmea_parser (Linux) or build\nmea_parser.exe (Windows)
+make clean      # remove the entire build/ directory
 ```
 
-The Makefile auto-detects the platform via the `OS` environment variable and adjusts the binary extension and delete command accordingly.
+All compilation artefacts (`.o` files and the final binary) are placed under `build/`, which is git-ignored. The Makefile auto-detects the platform via the `OS` environment variable and adjusts the binary name and delete command accordingly.
 
 ### Compiler flags
 
@@ -25,11 +25,12 @@ The Makefile auto-detects the platform via the `OS` environment variable and adj
 | `-std=c++17` | Modern C++ features (structured bindings, `std::optional`, etc.) |
 | `-O2` | Release-level optimisation |
 | `-Wall -Wextra -Wpedantic` | Strict warnings — treat the codebase as zero-warning |
+| `-Isrc` | Allows module-qualified includes: `#include "nmea_parser/nmea_parser.h"` |
 
 ## Usage
 
 ```bash
-./nmea_parser <file.nmea> [file2.nmea ...]
+./build/nmea_parser <file.nmea> [file2.nmea ...]
 ```
 
 Multiple files are processed in argument order. The tool reads every line, applies the validation and deduplication pipeline, and prints results to stdout.
@@ -37,7 +38,7 @@ Multiple files are processed in argument order. The tool reads every line, appli
 ### Example
 
 ```
-$ ./nmea_parser trip.nmea
+$ ./build/nmea_parser trip.nmea
 
 === Processing Summary ===
   Total lines read      : 1042
@@ -59,19 +60,57 @@ $ ./nmea_parser trip.nmea
 https://www.google.com/maps/dir/32.073021,34.791264/32.073155,34.791400/...
 ```
 
-## Architecture & Module Structure
-
-The codebase is split into focused modules, each with a single responsibility:
+## Project Layout
 
 ```
-main.cpp          ─ Orchestrator: file I/O, counter bookkeeping, summary printing
-nmea_parser.h/cpp ─ NMEA checksum verification, sentence classification, $GPRMC extraction
-dedup.h/cpp       ─ Last-write-wins temporal dedup and spatial jitter suppression
-output.h/cpp      ─ gps_data_t population and Google Maps URL generation
-gpsd.h            ─ Provided C header (gps_data_t, gps_fix_t, validity helpers)
+.
+├── app/
+│   └── main.cpp                    ─ Application entry point (orchestrator)
+├── src/
+│   ├── gpsd/
+│   │   └── gpsd.h                  ─ Provided C header (gps_data_t, gps_fix_t, helpers)
+│   ├── nmea_parser/
+│   │   ├── nmea_parser.h           ─ Checksum verification, sentence classification, $GPRMC parsing
+│   │   └── nmea_parser.cpp
+│   ├── dedup/
+│   │   ├── dedup.h                 ─ Last-write-wins temporal dedup & spatial jitter suppression
+│   │   └── dedup.cpp
+│   └── output/
+│       ├── output.h                ─ gps_data_t population & Google Maps URL generation
+│       └── output.cpp
+├── build/                          ─ Compilation output (git-ignored)
+│   ├── app/
+│   │   └── main.o
+│   ├── src/
+│   │   ├── nmea_parser/nmea_parser.o
+│   │   ├── dedup/dedup.o
+│   │   └── output/output.o
+│   └── nmea_parser                 ─ Final binary
+├── Makefile
+├── .gitignore
+└── README.md
 ```
 
-`main.cpp` includes only the three module headers plus `gpsd.h`; it never touches parsing internals or dedup algorithms directly.
+**Convention:** every module lives in its own `src/<module>/` directory containing its `.h` and `.cpp` files. Includes use the module-qualified path:
+
+```cpp
+#include "nmea_parser/nmea_parser.h"   // cross-module include
+#include "dedup.h"                      // intra-module (same directory) — bare name is fine
+```
+
+### Adding new modules
+
+The Makefile auto-discovers sources via `$(wildcard src/*/*.cpp)` and headers via `$(wildcard src/*/*.h)`. To add a new module:
+
+1. Create `src/<name>/`
+2. Add `<name>.h` and `<name>.cpp` inside it
+3. Run `make` — the new module is compiled and linked automatically, no Makefile edits needed
+
+The `-Isrc` flag ensures every source file can `#include "<module>/<module>.h"` for cross-module dependencies.
+
+### Module responsibilities
+
+`app/main.cpp` includes only the three module headers plus `gpsd/gpsd.h` (resolved via `-Isrc`); it never touches parsing internals or dedup algorithms directly.
 
 ## Processing Pipeline
 
@@ -147,7 +186,7 @@ The default epsilon of `1e-5` degrees (~1.1 m) was chosen as a balance:
 - **Too large** (e.g. `1e-3`, ~111 m): genuine low-speed manoeuvres (parking lots, intersections) are collapsed.
 - **1e-5**: removes stationary jitter while preserving walking-speed movement and above.
 
-The constant `kSpatialEpsilon` in `dedup.h` can be adjusted for different use cases (e.g. increase it for coarse fleet tracking, decrease it for high-precision survey data).
+The constant `kSpatialEpsilon` in `src/dedup/dedup.h` can be adjusted for different use cases (e.g. increase it for coarse fleet tracking, decrease it for high-precision survey data).
 
 ### Proprietary Parsing vs. Library
 
@@ -157,15 +196,16 @@ An external NMEA library (e.g. `libnmea`, `minmea`) would reduce code but add a 
 
 | File | Role |
 |------|------|
-| `gpsd.h` | Provided C header — defines `gps_data_t`, `gps_fix_t`, validity masks, and safe getters. |
-| `nmea_parser.h` | Public API for checksum verification, sentence classification, and `$GPRMC` parsing. Defines `NmeaRecord` and `ChecksumResult`. |
-| `nmea_parser.cpp` | Implementation of the above plus internal helpers (`split`, `nmea_to_decimal`). |
-| `dedup.h` | Public API for temporal and spatial deduplication. Defines `kSpatialEpsilon`. |
-| `dedup.cpp` | Implementation of `dedup_last_write_wins` and `dedup_spatial`. |
-| `output.h` | Public API for `gps_data_t` population and Google Maps URL generation. |
-| `output.cpp` | Implementation of `to_gps_data` and `build_google_maps_url`. |
-| `main.cpp` | Thin orchestrator — file I/O, counter bookkeeping, summary and table printing. |
-| `Makefile` | Build system with Linux/Windows support. |
+| `src/gpsd/gpsd.h` | Provided C header — defines `gps_data_t`, `gps_fix_t`, validity masks, and safe getters. |
+| `src/nmea_parser/nmea_parser.h` | Public API for checksum verification, sentence classification, and `$GPRMC` parsing. Defines `NmeaRecord` and `ChecksumResult`. |
+| `src/nmea_parser/nmea_parser.cpp` | Implementation of the above plus internal helpers (`split`, `nmea_to_decimal`). |
+| `src/dedup/dedup.h` | Public API for temporal and spatial deduplication. Defines `kSpatialEpsilon`. |
+| `src/dedup/dedup.cpp` | Implementation of `dedup_last_write_wins` and `dedup_spatial`. |
+| `src/output/output.h` | Public API for `gps_data_t` population and Google Maps URL generation. |
+| `src/output/output.cpp` | Implementation of `to_gps_data` and `build_google_maps_url`. |
+| `app/main.cpp` | Thin orchestrator — file I/O, counter bookkeeping, summary and table printing. |
+| `Makefile` | Build system with per-module auto-discovery, Linux/Windows support. |
+| `.gitignore` | Excludes `build/` from version control. |
 
 ## Error Handling
 
@@ -181,7 +221,7 @@ Complete reference for every public symbol exposed by the project headers. Inter
 
 ---
 
-### `gpsd.h` — GPS Data Structures (provided)
+### `src/gpsd/gpsd.h` — GPS Data Structures (provided)
 
 C-linkage header (`extern "C"`) defining the canonical data container that the rest of the project populates.
 
@@ -250,9 +290,9 @@ Converts metres/second to knots (`mps * 1.9438444924406048`).
 
 ---
 
-### `nmea_parser.h` — Parsing & Validation
+### `src/nmea_parser/nmea_parser.h` — Parsing & Validation
 
-Declared in `nmea_parser.h`, implemented in `nmea_parser.cpp`.
+Declared in `src/nmea_parser/nmea_parser.h`, implemented in `src/nmea_parser/nmea_parser.cpp`.
 
 #### `NmeaRecord` (struct)
 
@@ -328,9 +368,9 @@ Classifies known-but-unsupported sentence types so they can be counted separatel
 
 ---
 
-### `dedup.h` — Deduplication
+### `src/dedup/dedup.h` — Deduplication
 
-Declared in `dedup.h`, implemented in `dedup.cpp`.
+Declared in `src/dedup/dedup.h`, implemented in `src/dedup/dedup.cpp`.
 
 #### `kSpatialEpsilon` (constant)
 
@@ -371,9 +411,9 @@ Spatial jitter suppression. Walks the list linearly and keeps a point only if it
 
 ---
 
-### `output.h` — Output Generation
+### `src/output/output.h` — Output Generation
 
-Declared in `output.h`, implemented in `output.cpp`.
+Declared in `src/output/output.h`, implemented in `src/output/output.cpp`.
 
 #### `gps_data_t to_gps_data(const NmeaRecord& r)`
 

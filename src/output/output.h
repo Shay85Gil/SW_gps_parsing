@@ -5,8 +5,8 @@
 #ifndef OUTPUT_H
 #define OUTPUT_H
 
-#include "nmea_parser.h"
-#include "gpsd.h"
+#include "nmea_parser/nmea_parser.h"
+#include "gpsd/gpsd.h"
 
 #include <string>
 #include <vector>
