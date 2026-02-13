@@ -1,5 +1,5 @@
 /*
- * dedup.h — Temporal and spatial deduplication of NMEA records
+ * dedup.h — Temporal and spatial deduplication of GPS records
  */
 
 #ifndef DEDUP_H
@@ -15,12 +15,12 @@ inline constexpr double kSpatialEpsilon = 1e-5;
 
 /// Last-write-wins: keep only the final record for each unique timestamp.
 /// Returns records sorted chronologically by timestamp.
-std::vector<NmeaRecord>
-dedup_last_write_wins(const std::vector<NmeaRecord>& records);
+std::vector<GpsRecord>
+dedup_last_write_wins(const std::vector<GpsRecord>& records);
 
 /// Spatial deduplication: suppress GPS jitter by dropping points closer than
 /// `epsilon` degrees (in either axis) from the previously kept point.
-std::vector<NmeaRecord>
-dedup_spatial(const std::vector<NmeaRecord>& records, double epsilon);
+std::vector<GpsRecord>
+dedup_spatial(const std::vector<GpsRecord>& records, double epsilon);
 
 #endif // DEDUP_H

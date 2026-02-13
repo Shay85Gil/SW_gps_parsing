@@ -129,7 +129,7 @@ bool is_not_relevant(const std::string& sentence)
            id == kIdGNGSA || id == kIdGNGGA;
 }
 
-bool parse_gprmc(const std::string& sentence, NmeaRecord& out)
+bool parse_gprmc(const std::string& sentence, GpsRecord& out)
 {
     auto star = sentence.rfind(kNmeaChecksumSep);
     std::string body = (star != std::string::npos) ? sentence.substr(0, star)
@@ -169,9 +169,9 @@ bool parse_gprmc(const std::string& sentence, NmeaRecord& out)
         }
     }
 
-    out.timestamp = fields[kFieldTime];
-    out.latitude  = lat;
-    out.longitude = lon;
-    out.speed_mps = speed_knots * kKnotsToMps;
+    out.timestamp          = fields[kFieldTime];
+    out.stream.latitude    = lat;
+    out.stream.longitude   = lon;
+    out.gpsdata.fix.speed  = speed_knots * kKnotsToMps;
     return true;
 }

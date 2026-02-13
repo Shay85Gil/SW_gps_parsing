@@ -36,7 +36,7 @@ int main(int argc, char* argv[])
     }
 
     // ── Stage 1: Read & parse ───────────────────────────────────────────
-    std::vector<NmeaRecord> all_records;
+    std::vector<GpsRecord> all_records;
     std::size_t lines_total    = 0;
     std::size_t checksum_fail  = 0;
     std::size_t not_relevant   = 0;
@@ -78,7 +78,7 @@ int main(int argc, char* argv[])
             }
 
             // Pass 2 — field validation & extraction.
-            NmeaRecord rec;
+            GpsRecord rec{};
             if (!parse_gprmc(line, rec)) {
                 ++parse_fail;
                 continue;
@@ -92,7 +92,7 @@ int main(int argc, char* argv[])
     auto deduped = dedup_last_write_wins(all_records);
     auto route   = dedup_spatial(deduped, kSpatialEpsilon);
 
-    // ── Stage 3: Populate gps_data_t & print ────────────────────────────
+    // ── Stage 3: Populate gpsd structs & print ──────────────────────────
     std::cout << "=== Processing Summary ===\n"
               << "  Total lines read     : " << lines_total << '\n'
               << "  Checksum failures    : " << checksum_fail << '\n'
@@ -118,12 +118,15 @@ int main(int argc, char* argv[])
     std::cout << std::string(kSeparatorWidth, '-') << '\n';
 
     for (std::size_t i = 0; i < route.size(); ++i) {
-        gps_data_t gd = to_gps_data(route[i]);
+        // Access lat/lon from ntrip_stream_t, speed from gps_device_t
+        const ntrip_stream_t& ns = route[i].stream;
+        gps_device_t dev{};
+        dev.gpsdata.fix.speed = route[i].gpsdata.fix.speed;
 
         std::cout << std::setw(kColIndex) << (i + 1)
-                  << std::setw(kColCoord) << gd.fix.latitude
-                  << std::setw(kColCoord) << gd.fix.longitude
-                  << gd.fix.speed << '\n';
+                  << std::setw(kColCoord) << ns.latitude
+                  << std::setw(kColCoord) << ns.longitude
+                  << dev.gpsdata.fix.speed << '\n';
     }
 
     std::cout << "\n=== Google Maps URL ===\n"

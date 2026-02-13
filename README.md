@@ -72,13 +72,13 @@ https://www.google.com/maps/dir/32.073021,34.791264/32.073155,34.791400/...
 │   ├── gpsd/
 │   │   └── gpsd.h (+ dependency headers) ─ gpsd headers for GPS data types
 │   ├── nmea_parser/
-│   │   ├── nmea_parser.h           ─ Checksum verification, sentence classification, $GPRMC parsing
+│   │   ├── nmea_parser.h           ─ GpsRecord, checksum verification, sentence classification, $GPRMC parsing
 │   │   └── nmea_parser.cpp
 │   ├── dedup/
 │   │   ├── dedup.h                 ─ Last-write-wins temporal dedup & spatial jitter suppression
 │   │   └── dedup.cpp
 │   └── output/
-│       ├── output.h                ─ gps_data_t population & Google Maps URL generation
+│       ├── output.h                ─ Google Maps URL generation
 │       └── output.cpp
 ├── build/                          ─ Compilation output (git-ignored)
 │   ├── app/
@@ -164,7 +164,7 @@ The temporally-deduplicated list is walked linearly. A point is added to the fin
 
 ### Stage 4 — Output (`output`)
 
-Each surviving point is wrapped in the `gps_data_t` structure (from `gpsd.h`) via `to_gps_data`, with `LATLON_SET | SPEED_SET` flags set and mode `MODE_2D`.
+Each surviving `GpsRecord` already carries its data in gpsd types: latitude and longitude in `ntrip_stream_t`, speed in `gps_data_t.fix.speed`. In the print loop, speed is additionally copied into a stack-local `gps_device_t` to demonstrate the `dev.gpsdata.fix.speed` access path.
 
 `build_google_maps_url` constructs a directions URL by appending `/lat,lon` segments to `https://www.google.com/maps/dir`.
 
@@ -198,13 +198,13 @@ An external NMEA library (e.g. `libnmea`, `minmea`) would reduce code but add a 
 
 | File | Role |
 |------|------|
-| `src/gpsd/gpsd.h` | gpsd header providing `gps_data_t`, `gps_fix_t`, `gps_mask_t`, and all `*_SET` / `MODE_*` constants (header-only, no runtime linking). |
-| `src/nmea_parser/nmea_parser.h` | Public API for checksum verification, sentence classification, and `$GPRMC` parsing. Defines `NmeaRecord` and `ChecksumResult`. |
+| `src/gpsd/gpsd.h` | gpsd header providing `gps_data_t`, `gps_fix_t`, `ntrip_stream_t`, `gps_device_t`, and related constants (header-only, no runtime linking). |
+| `src/nmea_parser/nmea_parser.h` | Public API for checksum verification, sentence classification, and `$GPRMC` parsing. Defines `GpsRecord` and `ChecksumResult`. |
 | `src/nmea_parser/nmea_parser.cpp` | Implementation of the above plus internal helpers (`split`, `nmea_to_decimal`). |
 | `src/dedup/dedup.h` | Public API for temporal and spatial deduplication. Defines `kSpatialEpsilon`. |
 | `src/dedup/dedup.cpp` | Implementation of `dedup_last_write_wins` and `dedup_spatial`. |
-| `src/output/output.h` | Public API for `gps_data_t` population and Google Maps URL generation. |
-| `src/output/output.cpp` | Implementation of `to_gps_data` and `build_google_maps_url`. |
+| `src/output/output.h` | Public API for Google Maps URL generation. |
+| `src/output/output.cpp` | Implementation of `build_google_maps_url`. |
 | `app/main.cpp` | Thin orchestrator — file I/O, counter bookkeeping, summary and table printing. |
 | `Makefile` | Build system with per-module auto-discovery, Linux/Windows support. |
 | `.gitignore` | Excludes `build/` from version control. |
@@ -279,7 +279,6 @@ All magic numbers have been replaced with named `static constexpr` constants. Co
 | Constant | Value | Purpose |
 |----------|-------|---------|
 | `kCoordPrecision` | `6` | Decimal places for coordinate formatting. |
-| `kGpsStatusValid` | `1` | `gps_data_t.status` value for a valid fix. |
 | `kGoogleMapsBase` | `"https://www.google.com/maps/dir"` | Base URL for Google Maps directions. |
 
 ### Display Formatting (`main.cpp`, internal)
@@ -299,7 +298,7 @@ Complete reference for every public symbol exposed by the project headers. Inter
 
 ### `src/gpsd/gpsd.h` — gpsd Daemon Header
 
-The gpsd header bundled in `src/gpsd/`. Provides `gps_data_t`, `gps_fix_t`, `gps_mask_t`, validity flags (`LATLON_SET`, `SPEED_SET`, etc.), and fix mode constants (`MODE_2D`, `MODE_3D`, etc.). Used header-only for type definitions — no runtime linking required. See the [gpsd documentation](https://gpsd.io/) for the full API reference.
+The gpsd header bundled in `src/gpsd/`. Provides `gps_data_t`, `gps_fix_t`, `ntrip_stream_t`, `gps_device_t`, and related constants. Used header-only for type definitions — no runtime linking required. The project uses `ntrip_stream_t` to store latitude/longitude and `gps_data_t` (via `gps_device_t.gpsdata`) to store speed. See the [gpsd documentation](https://gpsd.io/) for the full API reference.
 
 ---
 
@@ -307,16 +306,15 @@ The gpsd header bundled in `src/gpsd/`. Provides `gps_data_t`, `gps_fix_t`, `gps
 
 Declared in `src/nmea_parser/nmea_parser.h`, implemented in `src/nmea_parser/nmea_parser.cpp`.
 
-#### `NmeaRecord` (struct)
+#### `GpsRecord` (struct)
 
-Intermediate record produced by a successful `$GPRMC` parse. Carries the minimum data needed for deduplication and output.
+GPS record produced by a successful `$GPRMC` parse. Uses gpsd types for coordinate and speed storage; carries the minimum data needed for deduplication and output.
 
-| Field | Type | Unit | Description |
-|-------|------|------|-------------|
-| `timestamp` | `std::string` | `HHMMSS.sss` | UTC time extracted from the sentence. Used as the dedup key. |
-| `latitude` | `double` | decimal degrees | +N / −S, already converted from NMEA `DDMM.MMMM`. |
-| `longitude` | `double` | decimal degrees | +E / −W, already converted from NMEA `DDDMM.MMMM`. |
-| `speed_mps` | `double` | m/s | Speed over ground, converted from knots. |
+| Field | Type | Description |
+|-------|------|-------------|
+| `timestamp` | `std::string` | UTC time (`HHMMSS.sss`), used as the dedup key. |
+| `stream` | `ntrip_stream_t` | `.latitude` (decimal degrees, +N/−S) and `.longitude` (decimal degrees, +E/−W). |
+| `gpsdata` | `gps_data_t` | `.fix.speed` — speed over ground in m/s, converted from knots. |
 
 #### `ChecksumResult` (enum class)
 
@@ -355,7 +353,7 @@ Classifies known-but-unsupported sentence types so they can be counted separatel
 | `true` | Sentence ID is `$GPGGA`, `$GPGSA`, `$GNGGA`, or `$GNGSA`. |
 | `false` | Any other sentence ID. |
 
-#### `bool parse_gprmc(const std::string& sentence, NmeaRecord& out)`
+#### `bool parse_gprmc(const std::string& sentence, GpsRecord& out)`
 
 **Pass 2** of the validation pipeline. Extracts position and speed from a `$GPRMC` or `$GNRMC` sentence.
 
@@ -393,21 +391,21 @@ inline constexpr double kSpatialEpsilon = 1e-5;
 
 Default spatial deduplication threshold in decimal degrees. Approximately 1.1 m at the equator. Used as the default `epsilon` argument to `dedup_spatial`.
 
-#### `std::vector<NmeaRecord> dedup_last_write_wins(const std::vector<NmeaRecord>& records)`
+#### `std::vector<GpsRecord> dedup_last_write_wins(const std::vector<GpsRecord>& records)`
 
 Temporal deduplication using the last-write-wins strategy.
 
 | Parameter | Description |
 |-----------|-------------|
-| `records` | All valid `NmeaRecord`s in file-read order. |
+| `records` | All valid `GpsRecord`s in file-read order. |
 
 | Return | Description |
 |--------|-------------|
-| `std::vector<NmeaRecord>` | One record per unique timestamp, sorted chronologically. For duplicate timestamps, the record appearing last in the input wins. |
+| `std::vector<GpsRecord>` | One record per unique timestamp, sorted chronologically. For duplicate timestamps, the record appearing last in the input wins. |
 
-**Complexity:** O(n log n) — single pass into a `std::map<string, NmeaRecord>`.
+**Complexity:** O(n log n) — single pass into a `std::map<string, GpsRecord>`.
 
-#### `std::vector<NmeaRecord> dedup_spatial(const std::vector<NmeaRecord>& records, double epsilon)`
+#### `std::vector<GpsRecord> dedup_spatial(const std::vector<GpsRecord>& records, double epsilon)`
 
 Spatial jitter suppression. Walks the list linearly and keeps a point only if it moved more than `epsilon` degrees from the last kept point.
 
@@ -418,7 +416,7 @@ Spatial jitter suppression. Walks the list linearly and keeps a point only if it
 
 | Return | Description |
 |--------|-------------|
-| `std::vector<NmeaRecord>` | Filtered route with jitter removed. The first point is always kept. |
+| `std::vector<GpsRecord>` | Filtered route with jitter removed. The first point is always kept. |
 
 **Complexity:** O(n) — single linear pass.
 
@@ -428,32 +426,9 @@ Spatial jitter suppression. Walks the list linearly and keeps a point only if it
 
 Declared in `src/output/output.h`, implemented in `src/output/output.cpp`.
 
-#### `gps_data_t to_gps_data(const NmeaRecord& r)`
+#### `std::string build_google_maps_url(const std::vector<GpsRecord>& route)`
 
-Converts an `NmeaRecord` into the `gps_data_t` structure from `gpsd.h`.
-
-| Parameter | Description |
-|-----------|-------------|
-| `r` | A validated, deduplicated NMEA record. |
-
-| Return | Description |
-|--------|-------------|
-| `gps_data_t` | Populated structure with `set = LATLON_SET \| SPEED_SET`, `mode = MODE_2D`, `status = 1`. |
-
-**Field mapping:**
-
-| `NmeaRecord` field | `gps_data_t` field |
-|---------------------|--------------------|
-| `r.latitude` | `fix.latitude` |
-| `r.longitude` | `fix.longitude` |
-| `r.speed_mps` | `fix.speed` |
-| — | `fix.mode = MODE_2D` |
-| — | `set = LATLON_SET \| SPEED_SET` |
-| — | `status = 1` |
-
-#### `std::string build_google_maps_url(const std::vector<NmeaRecord>& route)`
-
-Generates a Google Maps directions URL from an ordered route.
+Generates a Google Maps directions URL from an ordered route. Reads latitude and longitude from each record's `stream` (`ntrip_stream_t`) member.
 
 | Parameter | Description |
 |-----------|-------------|

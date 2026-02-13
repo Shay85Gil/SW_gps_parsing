@@ -5,15 +5,20 @@
 #ifndef NMEA_PARSER_H
 #define NMEA_PARSER_H
 
+#include "gpsd_config.h"
+#include "gpsd.h"
+
 #include <string>
 #include <vector>
 
-/// Intermediate record produced by a successful parse.
-struct NmeaRecord {
-    std::string timestamp;  // HHMMSS.sss — the unique dedup key
-    double      latitude;   // decimal degrees
-    double      longitude;  // decimal degrees
-    double      speed_mps;  // metres per second
+/// GPS record using gpsd types for coordinate/speed storage.
+///   - ntrip_stream_t holds latitude and longitude
+///   - gps_data_t     holds speed (via .fix.speed)
+///   - timestamp       is the HHMMSS.sss dedup key
+struct GpsRecord {
+    std::string    timestamp;  // HHMMSS.sss — the unique dedup key
+    ntrip_stream_t stream;     // .latitude, .longitude (decimal degrees)
+    gps_data_t     gpsdata;    // .fix.speed (metres per second)
 };
 
 /// Tri-state result for checksum verification.
@@ -33,6 +38,6 @@ bool is_not_relevant(const std::string& sentence);
 
 /// Pass 2 — parse a $GPRMC / $GNRMC sentence that already passed the
 /// checksum.  Returns true and fills `out` on success; false otherwise.
-bool parse_gprmc(const std::string& sentence, NmeaRecord& out);
+bool parse_gprmc(const std::string& sentence, GpsRecord& out);
 
 #endif // NMEA_PARSER_H
