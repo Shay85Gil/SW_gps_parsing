@@ -16,7 +16,9 @@ make            # produces build/nmea_parser (Linux) or build\nmea_parser.exe (W
 make clean      # remove the entire build/ directory
 ```
 
-All compilation artefacts (`.o` files and the final binary) are placed under `build/`, which is git-ignored. The Makefile auto-detects the platform via the `OS` environment variable and adjusts the binary name and delete command accordingly.
+All compilation artefacts (`.o` files and the final binary) are placed under `build/`, which is git-ignored. The Makefile auto-detects the platform via the `OS` environment variable and adjusts the binary name accordingly.
+
+**Windows note:** The Windows build was tested using Git Bash after Cygwin installation.
 
 ### Compiler flags
 

@@ -21,10 +21,8 @@ CXXFLAGS := -std=c++17 -O2 -Wall -Wextra -Wpedantic $(INCLUDES)
 
 ifeq ($(OS),Windows_NT)
     TARGET := $(BUILDDIR)/nmea_parser.exe
-    RM     := rmdir /S /Q $(BUILDDIR)
 else
     TARGET := $(BUILDDIR)/nmea_parser
-    RM     := rm -rf $(BUILDDIR)
 endif
 
 # Auto-discover every .cpp under src/ (any depth) and all app sources.
@@ -59,4 +57,4 @@ $(BUILD_DIRS) $(BUILDDIR):
 	mkdir -p $@
 
 clean:
-	$(RM)
+	rm -rf $(BUILDDIR)
