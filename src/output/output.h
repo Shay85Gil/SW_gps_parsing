@@ -6,7 +6,8 @@
 #define OUTPUT_H
 
 #include "nmea_parser.h"
-#include "gps_compat.h"
+#include "gpsd_config.h"
+#include "gpsd.h"
 
 #include <string>
 #include <vector>

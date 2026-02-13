@@ -68,9 +68,7 @@ https://www.google.com/maps/dir/32.073021,34.791264/32.073155,34.791400/...
 │   └── main.cpp                    ─ Application entry point (orchestrator)
 ├── src/
 │   ├── gpsd/
-│   │   └── gpsd.h                  ─ Real gpsd daemon header (reference only, not compiled)
-│   ├── gps_compat/
-│   │   └── gps_compat.h            ─ Self-contained subset of gpsd public API types
+│   │   └── gpsd.h (+ dependency headers) ─ gpsd headers for GPS data types
 │   ├── nmea_parser/
 │   │   ├── nmea_parser.h           ─ Checksum verification, sentence classification, $GPRMC parsing
 │   │   └── nmea_parser.cpp
@@ -112,7 +110,7 @@ The `-Isrc` flag ensures every source file can `#include "<module>/<module>.h"` 
 
 ### Module responsibilities
 
-`app/main.cpp` includes only the three module headers plus `gpsd/gpsd.h` (resolved via `-Isrc`); it never touches parsing internals or dedup algorithms directly.
+`app/main.cpp` includes only the three module headers plus `gpsd_config.h` and `gpsd.h` (resolved via `-Isrc/gpsd/`); it never touches parsing internals or dedup algorithms directly.
 
 ## Processing Pipeline
 
@@ -164,7 +162,7 @@ The temporally-deduplicated list is walked linearly. A point is added to the fin
 
 ### Stage 4 — Output (`output`)
 
-Each surviving point is wrapped in the `gps_data_t` structure via `to_gps_data`, with `GPS_SET_LATLON | GPS_SET_SPEED` flags set and mode `MODE_2D`. The safe getter functions from `gpsd.h` are used to extract values for printing.
+Each surviving point is wrapped in the `gps_data_t` structure (from `gpsd.h`) via `to_gps_data`, with `LATLON_SET | SPEED_SET` flags set and mode `MODE_2D`.
 
 `build_google_maps_url` constructs a directions URL by appending `/lat,lon` segments to `https://www.google.com/maps/dir`.
 
@@ -192,14 +190,13 @@ The constant `kSpatialEpsilon` in `src/dedup/dedup.h` can be adjusted for differ
 
 ### Proprietary Parsing vs. Library
 
-An external NMEA library (e.g. `libnmea`, `minmea`) would reduce code but add a dependency. Since the task targets a single sentence type (`$GPRMC`) with well-defined field positions, a purpose-built parser is small, auditable, and has zero external dependencies beyond the C++ standard library and the provided `gpsd.h`.
+An external NMEA library (e.g. `libnmea`, `minmea`) would reduce code but add a dependency. Since the task targets a single sentence type (`$GPRMC`) with well-defined field positions, a purpose-built parser is small, auditable, and has no external dependencies beyond the C++ standard library.
 
 ## File Overview
 
 | File | Role |
 |------|------|
-| `src/gpsd/gpsd.h` | Real gpsd daemon header — kept for reference; not compiled (requires full gpsd build env). |
-| `src/gps_compat/gps_compat.h` | Self-contained subset of the gpsd public API. Defines `gps_data_t`, `gps_fix_t`, `gps_mask_t`, and `*_SET` / `MODE_*` constants using the same names as the real `gps.h`. |
+| `src/gpsd/gpsd.h` | gpsd header providing `gps_data_t`, `gps_fix_t`, `gps_mask_t`, and all `*_SET` / `MODE_*` constants (header-only, no runtime linking). |
 | `src/nmea_parser/nmea_parser.h` | Public API for checksum verification, sentence classification, and `$GPRMC` parsing. Defines `NmeaRecord` and `ChecksumResult`. |
 | `src/nmea_parser/nmea_parser.cpp` | Implementation of the above plus internal helpers (`split`, `nmea_to_decimal`). |
 | `src/dedup/dedup.h` | Public API for temporal and spatial deduplication. Defines `kSpatialEpsilon`. |
@@ -298,69 +295,9 @@ Complete reference for every public symbol exposed by the project headers. Inter
 
 ---
 
-### `src/gpsd/gpsd.h` — Real gpsd Daemon Header (reference)
+### `src/gpsd/gpsd.h` — gpsd Daemon Header
 
-The real gpsd daemon internals header. Kept in the repository for reference but **not compiled** — it requires the full gpsd build environment (`GPSD_CONFIG_H`, `compiler.h`, `gps.h`, `os_compat.h`, etc.). Our code uses `gps_compat.h` instead.
-
----
-
-### `src/gps_compat/gps_compat.h` — GPS Data Structures
-
-Self-contained C-linkage header (`extern "C"`) providing the subset of the gpsd public API (`gps.h`) that the project needs. Type names, field names, and flag values match the real gpsd library so code is source-compatible if later linked against the full `libgps`.
-
-#### Types
-
-| Type | Definition | Purpose |
-|------|-----------|---------|
-| `gps_mask_t` | `uint64_t` | Bitmask indicating which fields in `gps_data_t` carry valid data. |
-| `gps_fix_t` | `struct` | A single navigation fix. |
-| `gps_data_t` | `struct` | Top-level container wrapping a fix, its validity mask, and receiver status. |
-
-#### `gps_fix_t` fields
-
-| Field | Type | Unit | Description |
-|-------|------|------|-------------|
-| `time` | `double` | seconds (Unix epoch) | Timestamp of the fix. |
-| `mode` | `int` | — | Fix type (`MODE_NOT_SEEN`, `MODE_NO_FIX`, `MODE_2D`, `MODE_3D`). |
-| `latitude` | `double` | degrees (WGS84) | +N / −S. |
-| `longitude` | `double` | degrees (WGS84) | +E / −W. |
-| `speed` | `double` | m/s | Speed over ground. |
-
-#### `gps_data_t` fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `set` | `gps_mask_t` | Bitwise OR of `*_SET` flags. |
-| `fix` | `gps_fix_t` | Most recent navigation fix. |
-| `status` | `int` | Implementation-defined receiver status. |
-
-#### Validity flag constants (match real `gps.h`)
-
-| Constant | Value | Meaning |
-|----------|-------|---------|
-| `TIME_SET` | `1llu << 0` | `fix.time` is valid. |
-| `MODE_SET` | `1llu << 1` | `fix.mode` is valid. |
-| `LATLON_SET` | `1llu << 4` | `fix.latitude` and `fix.longitude` are valid. |
-| `SPEED_SET` | `1llu << 8` | `fix.speed` is valid. |
-
-#### Fix mode constants (match real `gps.h`)
-
-| Constant | Value | Meaning |
-|----------|-------|---------|
-| `MODE_NOT_SEEN` | `0` | Mode not yet determined. |
-| `MODE_NO_FIX` | `1` | No valid fix. |
-| `MODE_2D` | `2` | Lat/lon valid. |
-| `MODE_3D` | `3` | Lat/lon/alt valid. |
-
-#### Inline helper functions
-
-**`double gps_mps_to_kmh(double mps)`**
-
-Converts metres/second to kilometres/hour (`mps * 3.6`).
-
-**`double gps_mps_to_knots(double mps)`**
-
-Converts metres/second to knots (`mps * 1.9438444924406048`).
+The gpsd header bundled in `src/gpsd/`. Provides `gps_data_t`, `gps_fix_t`, `gps_mask_t`, validity flags (`LATLON_SET`, `SPEED_SET`, etc.), and fix mode constants (`MODE_2D`, `MODE_3D`, etc.). Used header-only for type definitions — no runtime linking required. See the [gpsd documentation](https://gpsd.io/) for the full API reference.
 
 ---
 
@@ -491,7 +428,7 @@ Declared in `src/output/output.h`, implemented in `src/output/output.cpp`.
 
 #### `gps_data_t to_gps_data(const NmeaRecord& r)`
 
-Converts an `NmeaRecord` into the `gps_data_t` structure from `gps_compat.h`.
+Converts an `NmeaRecord` into the `gps_data_t` structure from `gpsd.h`.
 
 | Parameter | Description |
 |-----------|-------------|

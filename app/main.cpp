@@ -11,7 +11,8 @@
 #include "nmea_parser.h"
 #include "dedup.h"
 #include "output.h"
-#include "gps_compat.h"
+#include "gpsd_config.h"
+#include "gpsd.h"
 
 #include <cstddef>
 #include <fstream>
